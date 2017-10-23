@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 type User struct {
@@ -20,12 +22,12 @@ type User struct {
 }
 
 func DefineUserRoutes(router *mux.Router) {
-	router.HandleFunc("/authenticate", AuthUser).Methods("POST")
-	router.HandleFunc("/user/{id}", FetchUser).Methods("GET")
-	router.HandleFunc("/user", userCreate).Methods("POST")
-	router.HandleFunc("/user", userUpdate).Methods("PUT")
-	router.HandleFunc("/user/{id}", Delete).Methods("DELETE")
-	router.HandleFunc("/user/undelete/{id}", Undelete).Methods("PUT")
+	router.HandleFunc("/authenticate", GetTokenHandler).Methods("POST")
+	router.Handle("/user/{id}", jwtMiddleware.Handler(FetchUser)).Methods("GET")
+	router.Handle("/user", jwtMiddleware.Handler(userCreate)).Methods("POST")
+	router.Handle("/user", jwtMiddleware.Handler(userUpdate)).Methods("PUT")
+	router.Handle("/user/{id}", jwtMiddleware.Handler(Delete)).Methods("DELETE")
+	router.Handle("/user/undelete/{id}", jwtMiddleware.Handler(Undelete)).Methods("PUT")
 }
 
 func GetUser(id int) (User, error) {
@@ -196,7 +198,7 @@ func AuthUser(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func FetchUser(writer http.ResponseWriter, request *http.Request) {
+var FetchUser = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 	vars := mux.Vars(request)
 
 	id, err := strconv.Atoi(vars["id"])
@@ -215,9 +217,9 @@ func FetchUser(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	writer.Write(encodedUser)
-}
+})
 
-func userCreate(writer http.ResponseWriter, request *http.Request) {
+var userCreate = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 	decoder := json.NewDecoder(request.Body)
 	var user User
 
@@ -257,9 +259,9 @@ func userCreate(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(201)
 		writer.Write(encodedUser)
 	}
-}
+})
 
-func userUpdate(writer http.ResponseWriter, request *http.Request) {
+var userUpdate = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 	decoder := json.NewDecoder(request.Body)
 	var user User
 
@@ -291,9 +293,9 @@ func userUpdate(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(200)
 		writer.Write([]byte("Success"))
 	}
-}
+})
 
-func Delete(writer http.ResponseWriter, request *http.Request) {
+var Delete = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 	vars := mux.Vars(request)
 
 	id, err := strconv.Atoi(vars["id"])
@@ -310,9 +312,9 @@ func Delete(writer http.ResponseWriter, request *http.Request) {
 
 	writer.WriteHeader(200)
 	writer.Write([]byte("Delete successful"))
-}
+})
 
-func Undelete(writer http.ResponseWriter, request *http.Request) {
+var Undelete = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 	vars := mux.Vars(request)
 
 	id, err := strconv.Atoi(vars["id"])
@@ -329,4 +331,34 @@ func Undelete(writer http.ResponseWriter, request *http.Request) {
 
 	writer.WriteHeader(200)
 	writer.Write([]byte("Undelete successful"))
+})
+
+func GetTokenHandler(writer http.ResponseWriter, request *http.Request) {
+	decoder := json.NewDecoder(request.Body)
+	var user User
+
+	err := decoder.Decode(&user)
+	if err != nil {
+		panic(err)
+	}
+
+	isValid, err := ValidateUser(user.Email, user.Pass)
+	if err != nil {
+		fmt.Println(err.Error())
+	} else {
+		if isValid {
+			token := jwt.New(jwt.SigningMethodHS256)
+			claims := token.Claims.(jwt.MapClaims)
+
+			claims["email"] = user.Email
+			claims["exp"] = time.Now().Add(time.Hour * 24).Unix()
+
+			tokenString, _ := token.SignedString(mySigningKey)
+
+			writer.Write([]byte(tokenString))
+		} else {
+			writer.WriteHeader(401)
+			fmt.Println("Authentication failed")
+		}
+	}
 }

@@ -9,7 +9,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
 	"net/http"
-	"time"
 )
 
 var connectionString string
@@ -45,19 +44,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func GetTokenHandler(writer http.ResponseWriter, request *http.Request) {
-	token := jwt.New(jwt.SigningMethodHS256)
-	claims := token.Claims.(jwt.MapClaims)
-
-	claims["admin"] = true
-	claims["name"] = "Mo"
-	claims["exp"] = time.Now().Add(time.Hour * 24).Unix()
-
-	tokenString, _ := token.SignedString(mySigningKey)
-
-	writer.Write([]byte(tokenString))
 }
 
 var handleTest = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
