@@ -1,10 +1,8 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/bcrypt"
 	"net/http"
@@ -26,16 +24,12 @@ func DefineUserRoutes(router *mux.Router) {
 	router.HandleFunc("/user/{id}", FetchUser).Methods("GET")
 	router.HandleFunc("/user", userCreate).Methods("POST")
 	router.HandleFunc("/user", userUpdate).Methods("PUT")
+	router.HandleFunc("/user/{id}", Delete).Methods("DELETE")
+	router.HandleFunc("/user/undelete/{id}", Undelete).Methods("PUT")
 }
 
 func GetUser(id int) (User, error) {
 	var user User
-
-	db, err := sql.Open("mysql", connectionString)
-	if err != nil {
-		return user, err
-	}
-	defer db.Close()
 
 	query := fmt.Sprintf(`SELECT id,
     email,
@@ -45,12 +39,22 @@ func GetUser(id int) (User, error) {
     admin
     FROM users WHERE id=%d`, id)
 
-	err = db.QueryRow(query).Scan(&user.Id,
-		&user.Email,
-		&user.Pass,
-		&user.First,
-		&user.Last,
-		&user.Admin)
+	rows, err := db.Query(query)
+
+	for rows.Next() {
+		err := rows.Scan(&user.Id,
+			&user.Email,
+			&user.Pass,
+			&user.First,
+			&user.Last,
+			&user.Admin)
+
+		if err != nil {
+			return user, err
+		}
+	}
+
+	rows.Close()
 
 	if err != nil {
 		return user, err
@@ -59,13 +63,33 @@ func GetUser(id int) (User, error) {
 	return user, nil
 }
 
-func (user *User) Update() error {
-	db, err := sql.Open("mysql", connectionString)
+func DeleteUser(id int) error {
+	query := fmt.Sprintf(`UPDATE USERS
+    SET isDeleted = 1
+    WHERE id=%d`, id)
+
+	_, err := db.Exec(query)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
 
+	return nil
+}
+
+func UndeleteUser(id int) error {
+	query := fmt.Sprintf(`UPDATE USERS
+    SET isDeleted = 0
+    WHERE id=%d`, id)
+
+	_, err := db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (user *User) Update() error {
 	updateStatement, err := db.Prepare(`UPDATE users
     SET 
     first = ?,
@@ -100,12 +124,6 @@ func HashPassword(pass string) string {
 
 func (user *User) Create() (User, error) {
 	var newUser User
-
-	db, err := sql.Open("mysql", connectionString)
-	if err != nil {
-		return newUser, err
-	}
-	defer db.Close()
 
 	insertStatement, err := db.Prepare(`INSERT INTO users
     (email,
@@ -142,16 +160,9 @@ func (user *User) Create() (User, error) {
 }
 
 func ValidateUser(email string, pass string) (bool, error) {
-
-	db, err := sql.Open("mysql", connectionString)
-	if err != nil {
-		return false, err
-	}
-	defer db.Close()
-
 	var hashedPass string
 	query := fmt.Sprintf("SELECT email, pass FROM users WHERE email='%s'", email)
-	err = db.QueryRow(query).Scan(&email, &hashedPass)
+	err := db.QueryRow(query).Scan(&email, &hashedPass)
 
 	if err != nil {
 		return false, err
@@ -280,4 +291,42 @@ func userUpdate(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(200)
 		writer.Write([]byte("Success"))
 	}
+}
+
+func Delete(writer http.ResponseWriter, request *http.Request) {
+	vars := mux.Vars(request)
+
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		writer.WriteHeader(400)
+		writer.Write([]byte(err.Error()))
+	}
+
+	err = DeleteUser(id)
+	if err != nil {
+		writer.WriteHeader(400)
+		writer.Write([]byte(err.Error()))
+	}
+
+	writer.WriteHeader(200)
+	writer.Write([]byte("Delete successful"))
+}
+
+func Undelete(writer http.ResponseWriter, request *http.Request) {
+	vars := mux.Vars(request)
+
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		writer.WriteHeader(400)
+		writer.Write([]byte(err.Error()))
+	}
+
+	err = UndeleteUser(id)
+	if err != nil {
+		writer.WriteHeader(400)
+		writer.Write([]byte(err.Error()))
+	}
+
+	writer.WriteHeader(200)
+	writer.Write([]byte("Undelete successful"))
 }
